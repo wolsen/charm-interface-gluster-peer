@@ -29,3 +29,16 @@ The interface will set the following reactive states, as appropriate:
 
     * `ip_map`
     * `brick_map`
+
+  * `{relation_name}.departed` A unit of the gluster cluster has been removed.
+    The local unit can query the remaining units via the `ip_map` or 
+    `brick_map` methods.  
+
+  * `{relation_name}.bricks.available` One or more storage bricks on a remote  
+    unit is new to the local unit. All bricks in the cluster can be retrieved
+    using the `brick_map` method, which return a mapping of units to bricks.
+
+  * `{relation_name}.bricks.removed` One or more storage bricks previously 
+    known by the local unit is no longer in the remote unit. The current map 
+    of known bricks in the application can be retrieved using the `brick_map`
+    method.

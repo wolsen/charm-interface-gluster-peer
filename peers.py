@@ -14,6 +14,7 @@
 from charms.reactive import RelationBase
 from charms.reactive import hook
 from charms.reactive import scopes
+from charmhelpers.core import unitdata
 
 
 class GlusterPeers(RelationBase):
@@ -26,9 +27,48 @@ class GlusterPeers(RelationBase):
     @hook('{peers:gluster-peer}-relation-changed')
     def changed(self):
         conv = self.conversation()
-        conv.set_state('{relation_name}.connected')
+        self._evaluate_brick_events()
+
+        # Check to see if this is actually true or not.
         if self.data_complete(conv):
             conv.set_state('{relation_name}.available')
+
+    def _evaluate_brick_events(self):
+        """
+        Raises any relevant brick change events based on the bricks
+        advertised by the remote unit.
+
+        Evaluates the remote unit's advertised bricks and the local unit's
+        knowledge of said bricks and sets the following reactive states:
+
+         - `{relation_name}.bricks.available`: When the remote unit
+           advertises a brick device which is not known the local unit.
+
+         - `{relation_name}.bricks.removed`: When the local unit knows about a
+           brick device that is not advertised by the remote unit.
+
+        Note: the entire brick set is evaluated for the remote unit
+        participating in the conversation. AS such, both events/states may be
+        set in a single invocation.
+        """
+        conv = self.conversation()
+        local_bricks = set(conv.get_local('bricks') or [])
+        remote_bricks = set(conv.get_remote('bricks') or [])
+
+        # When the local unit has more bricks than the remote unit,
+        # a bricks.removed state should be set on the conversation.
+        if local_bricks.difference(remote_bricks):
+            conv.set_state('{relation_name}.bricks.removed')
+
+        # When the peer unit has advertised that it has more bricks than this
+        # local unit knows about, then there are new bricks available.
+        if remote_bricks.difference(local_bricks):
+            conv.set_state('{relation_name}.bricks.available')
+
+        # Save the remote_bricks as the local copy and flush the data to ensure
+        # that it is persisted.
+        conv.set_local('bricks', conv.get_remote('bricks') or [])
+        unitdata.kv().flush()
 
     @hook('{peers:gluster-peer}-relation-{broken,departed}')
     def departed_or_broken(self):
@@ -38,6 +78,21 @@ class GlusterPeers(RelationBase):
             conv.remove_state('{relation_name}.available')
 
     def ip_map(self, address_key='private-address'):
+        """
+        Returns a list of (unit_name, ip_address) tuples. The unit name will
+        will have the '/' replaced by a '-'.
+
+        An example list is:
+
+        [
+            ('glusterfs-0', '172.16.10.5'),
+            ('glusterfs-1', '172.16.10.6'),
+        ]
+
+        :param address_key: the type of address to return, defaults to the
+            private-address of the remote unit.
+        :return: a list of (unit_name, ip_address) tuples.
+        """
         nodes = []
         for conv in self.conversations():
             host_name = conv.scope.replace('/', '-')
@@ -53,8 +108,8 @@ class GlusterPeers(RelationBase):
         An example mapping is:
 
         {
-            'unit-glusterfs-1': ['/dev/sdb', '/dev/sdc'],
-            'unit-glusterfs-2': ['/dev/sdb', '/dev/sdc', '/dev/sdd'],
+            'glusterfs-1': ['/dev/sdb', '/dev/sdc'],
+            'glusterfs-2': ['/dev/sdb', '/dev/sdc', '/dev/sdd'],
         }
 
         :return: a map with key being hostname and the value being a list of
