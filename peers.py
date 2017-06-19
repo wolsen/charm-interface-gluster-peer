@@ -14,11 +14,16 @@
 from charms.reactive import RelationBase
 from charms.reactive import hook
 from charms.reactive import scopes
+from charmhelpers.core import hookenv
 from charmhelpers.core import unitdata
 
 
 class GlusterPeers(RelationBase):
     scope = scopes.UNIT
+
+    def __init__(self, *args, **kwargs):
+        self.local_name = hookenv.local_unit().replace('/', '-')
+        super(GlusterPeers, self).__init__(*args, **kwargs)
 
     @hook('{peers:gluster-peer}-relation-joined')
     def joined(self):
@@ -120,6 +125,9 @@ class GlusterPeers(RelationBase):
             host_name = conv.scope.replace('/', '-')
             brick_map[host_name] = conv.get_remote('bricks') or []
 
+        # Include any bricks which have been set by the local unit.
+        brick_map[self.local_name] = self._get_local_bricks()
+
         return brick_map
 
     def data_complete(self, conv):
@@ -160,6 +168,32 @@ class GlusterPeers(RelationBase):
         """
         for conv in self.conversations():
             conv.set_remote(key='bricks', value=bricks or [])
+
+        # Save the local bricks as a locally scoped key in the local
+        # key/value storage. This data will be returned in the brick_map
+        # for consumption by the charm.
+        self._save_local_bricks(bricks)
+
+    def _save_local_bricks(self, bricks):
+        """Saves the list of bricks to the local key/value storage for later
+        use.
+
+        :param bricks: the bricks to save in local storage.
+        :return: None
+        """
+        kv = unitdata.kv()
+        key = '%s.%s' % (self.local_name, 'bricks')
+        kv.set(key, bricks)
+        kv.flush()
+
+    def _get_local_bricks(self):
+        """Returns a list of the bricks set for the local unit.
+
+        :return list: the list of bricks set by the local unit
+        """
+        kv = unitdata.kv()
+        key = '%s.%s' % (self.local_name, 'bricks')
+        return kv.get(key) or []
 
     def send_all(self, settings, store_local=False):
         """Advertise a setting to peer units
