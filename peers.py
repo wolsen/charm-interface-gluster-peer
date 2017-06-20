@@ -82,53 +82,58 @@ class GlusterPeers(RelationBase):
         if not self.data_complete(conv):
             conv.remove_state('{relation_name}.available')
 
-    def ip_map(self, address_key='private-address'):
-        """
-        Returns a list of (unit_name, ip_address) tuples. The unit name will
-        will have the '/' replaced by a '-'.
+    def get_peer_info(self, address_key='private-address'):
+        """Returns a dict containing the peer information, mapped by the
+        unit's name.
 
-        An example list is:
+        The peer info returned will contain the address of the remote peer
+        and the storage bricks that it has available. Each peer is mapped by
+        its unit name (with the '/' replaced by a '-').
 
-        [
-            ('glusterfs-0', '172.16.10.5'),
-            ('glusterfs-1', '172.16.10.6'),
-        ]
-
-        :param address_key: the type of address to return, defaults to the
-            private-address of the remote unit.
-        :return: a list of (unit_name, ip_address) tuples.
-        """
-        nodes = []
-        for conv in self.conversations():
-            host_name = conv.scope.replace('/', '-')
-            nodes.append((host_name, conv.get_remote(address_key)))
-
-        return nodes
-
-    def brick_map(self):
-        """
-        Returns a map of the bricks on remote units mapped by the unit's
-        name. The unit name will have the '/' replaced by a '-'.
-
-        An example mapping is:
+        An example return value is:
 
         {
-            'glusterfs-1': ['/dev/sdb', '/dev/sdc'],
-            'glusterfs-2': ['/dev/sdb', '/dev/sdc', '/dev/sdd'],
+            'glusterfs/0': {
+                'address': '172.16.10.5',
+                'bricks': ['/dev/sdb', '/dev/sdc']
+            },
+            'glusterfs/1': {
+                'address': '172.16.10.6',
+                'bricks': ['/dev/sdb', '/dev/sdc', '/dev/sdd']
+            },
         }
 
-        :return: a map with key being hostname and the value being a list of
-            brick names on the remote unit.
+        :param address_key: the key to use to fetch the remote unit's address.
+        :return dict: the keys will be the unit's name and the value will be
+            a dict containing the peer information, including the address and a
+            list of bricks provided by that peer.
         """
-        brick_map = {}
+        peermap = {}
+
         for conv in self.conversations():
-            host_name = conv.scope.replace('/', '-')
-            brick_map[host_name] = conv.get_remote('bricks') or []
+            # When relation is departing, the conversation may no longer be
+            # valid so verify that it is valid before attempting to access
+            # the information.
+            if not conv or not conv.scope:
+                hookenv.log('conversation is invalid', level=hookenv.DEBUG)
+                continue
 
-        # Include any bricks which have been set by the local unit.
-        brick_map[self.local_name] = self._get_local_bricks()
+            remote_unit_name = conv.scope
+            peermap[remote_unit_name] = {
+                'address': conv.get_remote(address_key),
+                'bricks': conv.get_remote('bricks') or [],
+            }
 
-        return brick_map
+        # Include information from the local unit.
+        # TODO(wolsen): this will only provide the local unit's private address
+        # This will need to change to allow for network bindings and other such
+        # network configuration choices. For now, keep it simple.
+        peermap[hookenv.local_unit()] = {
+            'address': hookenv.unit_private_ip(),
+            'bricks': self._get_local_bricks(),
+        }
+
+        return peermap
 
     def data_complete(self, conv):
         """Determines if the gluster peer conversation is completed or not.
