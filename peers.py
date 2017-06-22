@@ -17,6 +17,8 @@ from charms.reactive import scopes
 from charmhelpers.core import hookenv
 from charmhelpers.core import unitdata
 
+import json
+
 
 class GlusterPeers(RelationBase):
     scope = scopes.UNIT
@@ -119,9 +121,10 @@ class GlusterPeers(RelationBase):
                 continue
 
             remote_unit_name = conv.scope
+            remote_bricks = json.loads(conv.get_remote('bricks') or '[]')
             peermap[remote_unit_name] = {
                 'address': conv.get_remote(address_key),
-                'bricks': conv.get_remote('bricks') or [],
+                'bricks': remote_bricks,
             }
 
         # Include information from the local unit.
@@ -171,8 +174,9 @@ class GlusterPeers(RelationBase):
         :param bricks: the list of bricks available on the local unit
         :return: None
         """
+        value = json.dumps(bricks or [])
         for conv in self.conversations():
-            conv.set_remote(key='bricks', value=bricks or [])
+            conv.set_remote(key='bricks', value=value)
 
         # Save the local bricks as a locally scoped key in the local
         # key/value storage. This data will be returned in the brick_map
